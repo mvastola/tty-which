@@ -11,26 +11,61 @@ module TTY
     #   the command to search for
     # @param [Array<String>] paths
     #   the paths to look through
+    # @param [Boolean] all
+    #   whether to return all matching paths
     #
     # @example
     #   which("ruby")                 # => "/usr/local/bin/ruby"
     #   which("/usr/local/bin/ruby")  # => "/usr/local/bin/ruby"
     #   which("foo")                  # => nil
+    #   which("ruby", all: true)      # => ["/usr/local/bin/ruby", "/usr/bin/ruby", ...]
+    #   which("foo", all: true)       # => []
     #
     # @example
     #   which("ruby", paths: ["/usr/locale/bin", "/usr/bin", "/bin"])
     #
-    # @return [String, nil]
-    #   the absolute path to executable if found, `nil` otherwise
+    # @return [String, Array<String>, nil]
+    #   the first absolute path to an executable if found, `nil` or empty array otherwise
+    def which(cmd, paths: search_paths, all: false)
+      enumerator = each_path(cmd, paths:)
+      all ? enumerator.to_a : enumerator.first
+    end
+    module_function :which
+
+    # @api public
+    # Iterate through paths for an executable in a platform independent way
+    #
+    # @param [String] cmd
+    #   the command to search for
+    # @param [optional, Array<String>] paths
+    #   the paths to look through
+    # @yieldparam [optional, String] an absolute path to the executable
+    #
+    # @example
+    #   which("ruby")                 # => enumerator of "/usr/local/bin/ruby", "/usr/bin/ruby", ...
+    #   which("/usr/local/bin/ruby")  # => enumerator of "/usr/local/bin/ruby"
+    #   which("foo")                  # => empty enumerator
+    #
+    # @example
+    #   which("ruby", paths: ["/usr/locale/bin", "/usr/bin", "/bin"])
+    #
+    # @return [Enumerator<String>, nil]
+    #   if no block is given, a (lazy) enumerator of all absolute paths to the executable
     #
     # @api public
-    def which(cmd, paths: search_paths)
+    def each_path(cmd, paths: search_paths, &block)
+      unless block_given?
+        return Enumerator::Lazy.new(self) do |yielder|
+          each_path(cmd, paths:, &yielder.to_proc)
+        end
+      end
+
       if file_with_path?(cmd)
-        return cmd if executable_file?(cmd)
+        yield cmd if executable_file?(cmd)
 
         extensions.each do |ext|
           exe = "#{cmd}#{ext}"
-          return ::File.absolute_path(exe) if executable_file?(exe)
+          yield ::File.absolute_path(exe) if executable_file?(exe)
         end
         return nil
       end
@@ -38,16 +73,16 @@ module TTY
       paths.each do |path|
         if file_with_exec_ext?(cmd)
           exe = ::File.join(path, cmd)
-          return ::File.absolute_path(exe) if executable_file?(exe)
+          yield ::File.absolute_path(exe) if executable_file?(exe)
         end
         extensions.each do |ext|
           exe = ::File.join(path, "#{cmd}#{ext}")
-          return ::File.absolute_path(exe) if executable_file?(exe)
+          yield ::File.absolute_path(exe) if executable_file?(exe)
         end
       end
       nil
     end
-    module_function :which
+    module_function :each_path
 
     # Check if executable exists in the path
     #
